@@ -1,0 +1,69 @@
+heat_template_version: 2014-10-16
+
+description: >
+  SRIOV VF settings
+
+parameters:
+  servers:
+    type: json
+  input_values:
+    type: json
+  DeployIdentifier:
+    type: string
+
+resources:
+  ExtraConfig:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      group: script
+      config: |
+            #!/bin/bash
+
+            vfcreation() {
+            BFD1=`lspci | grep Mellanox | head -n4 | tail -2f | head -n1 | awk '{ print $1 }'`
+            BFD2=`lspci | grep Mellanox | head -n4 | tail -1f | awk '{ print $1 }'`
+
+            NUM_OF_VFS=`mstconfig -d $BFD1 q | grep NUM_OF_VFS | awk '{ print $2 }'`
+            yes | sudo mstconfig -d $BFD1 s NUM_OF_VFS=31
+
+            NUM_OF_VFS=`mstconfig -d $BFD2 q | grep NUM_OF_VFS | awk '{ print $2 }'`
+            yes | sudo mstconfig -d $BFD2 s NUM_OF_VFS=31
+            sudo sed -i -e 's/8/31/g' /etc/sysconfig/allocate_vfs
+            }
+			
+                lspci | grep Mellanox
+                if [ $? -eq 0 ] ; then
+                        echo -e "Mellanox NIC Found. Trying to update no. of VFs to 31."
+
+
+                                if [ $(rpm -qa | grep mstflint) ] ; then
+                                     echo -e "mstflint package already installed"
+                                     vfcreation
+                                else
+                                echo -e "mstflint package NOT installed on the system, attempting to install it."
+                                yum list mstflint
+                                if [ $? -eq 0 ]; then
+                                        sudo yum install -y mstflint
+
+                                        if [ $(rpm -qa | grep 'mstflint') ]; then
+                                                  echo -e "mstflint package installed successfully."
+                                                  vfcreation
+                                        else
+                                                  echo -e "mstflint package NOT installed successfully."
+                                        fi
+                                else
+                                        echo -e "mstflint not found in repo."
+                                fi
+                            fi
+                else
+                        echo -e "No Mellanox NIC Found..\n"
+                fi
+				
+  ExtraDeploymentsCompute:
+    type: OS::Heat::SoftwareDeployments
+    properties:
+      servers:  {get_param: [servers, 'Compute']}
+      config: {get_resource: ExtraConfig}
+      actions: ['CREATE','UPDATE']
+      input_values:
+        deploy_identifier: {get_param: DeployIdentifier}

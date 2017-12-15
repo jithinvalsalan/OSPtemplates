@@ -1,0 +1,62 @@
+heat_template_version: 2014-10-16
+
+description: >
+  SRIOV VF settings and LLDP deactivation.
+
+parameters:
+  servers:
+    type: json
+  input_values:
+    type: json
+  DeployIdentifier:
+    type: string
+
+resources:
+  ExtraConfig:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      group: script
+      config: |
+            #!/bin/bash
+
+            vfcreation() {
+            
+            NUM_OF_VFS=`sudo mlxconfig -d /dev/mst/mt4117_pciconf1 q | grep NUM_OF_VFS | awk '{ print $2 }'`
+            yes | sudo mlxconfig -d /dev/mst/mt4117_pciconf1 s NUM_OF_VFS=127 
+			LLDP=`sudo mlxconfig -d /dev/mst/mt4117_pciconf1 q | grep -i lldp`
+			yes | sudo mlxconfig -d /dev/mst/mt4117_pciconf1 s LLDP_NB_RX_MODE_P1=0 LLDP_NB_TX_MODE_P1=0 LLDP_NB_RX_MODE_P2=0 LLDP_NB_TX_MODE_P2=0
+
+            NUM_OF_VFS=`sudo mlxconfig -d /dev/mst/mt4117_pciconf1.1 q | grep NUM_OF_VFS | awk '{ print $2 }'`
+            yes | sudo mlxconfig -d /dev/mst/mt4117_pciconf1.1 s NUM_OF_VFS=127 
+			LLDP=`sudo mlxconfig -d /dev/mst/mt4117_pciconf1.1 q | grep -i lldp`
+			yes | sudo mlxconfig -d /dev/mst/mt4117_pciconf1.1 s LLDP_NB_RX_MODE_P1=0 LLDP_NB_TX_MODE_P1=0 LLDP_NB_RX_MODE_P2=0 LLDP_NB_TX_MODE_P2=0
+			
+            sudo sed -i -e 's/8/127/g' /etc/sysconfig/allocate_vfs
+			
+			echo "conf system interface pattern eno*,ens4f0,ens4f1" | sudo tee /etc/lldpd.d/int.conf 
+            }
+			
+                lspci | grep Mellanox
+                if [ $? -eq 0 ] ; then
+                        echo -e "Mellanox NIC Found. Trying to update no. of VFs to 127."
+
+
+                                if [ $(rpm -qa | grep ^mlnx-ofa_kernel) ] ; then
+                                     echo -e "Mellanox OFED package already installed"
+                                     vfcreation
+                                else
+                                wall "Mellanox OFED package NOT installed on the system, please check overcloud image"
+                                
+                                fi
+                else
+                        echo -e "No Mellanox NIC Found..\n"
+                fi
+				
+  ExtraDeploymentsCompute:
+    type: OS::Heat::SoftwareDeployments
+    properties:
+      servers:  {get_param: [servers, 'Compute']}
+      config: {get_resource: ExtraConfig}
+      actions: ['CREATE','UPDATE']
+      input_values:
+        deploy_identifier: {get_param: DeployIdentifier}
